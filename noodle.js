@@ -143,6 +143,67 @@ function Noodle () {
     this.trace(a, b)
   }
 
+  this.bucket = () => {
+		const state = this.context.getImageData(0, 0, this.el.width, this.el.height)
+		const toFill = [{x: cursor.a.x, y: cursor.a.y}]
+		const filled = []
+		for (let x = 0; x < this.el.width; x++){
+			filled[x] = new Array(this.el.width)
+		}
+    filled[cursor.a.x][cursor.a.y] = true
+
+		const target = []
+		let offset = (cursor.a.y * this.el.width + cursor.a.x) * 4
+		target[0] = state.data[offset]
+		target[1] = state.data[offset + 1]
+		target[2] = state.data[offset + 2]
+
+    const convert = n => n === 0 ? 'black' : 'white'
+    const fill = cursor.color === 'black' ? 0 : 255
+
+    console.log(cursor.color, convert(target[0]), offset, target)
+
+    // Check if it's the same colour
+		if (target[0] !== fill) {
+			const neighbour = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+			for (let i = 0; i < toFill.length; i++) {
+				const current = toFill[i]
+				offset = (current.y * this.el.width + current.x) * 4
+				state.data[offset] = fill
+				state.data[offset+1] = fill
+				state.data[offset+2] = fill
+
+        // Check neighbours
+				for (let j = 0; j < 4; j++){
+					const k = {
+            x: current.x + neighbour[j][0],
+            y: current.y + neighbour[j][1]
+          }
+
+					if (
+            k.x >= 0 && k.x < this.el.width
+            && k.y >= 0 && k.y < this.el.height
+          ) {
+						offset = (k.y * this.el.width + k.x) * 4;
+
+            // Avoid filling the same pixel again later
+						if (!filled[k.x][k.y]) {
+							filled[k.x][k.y] = true;
+							if (
+                state.data[offset] === target[0]
+                && state.data[offset+1] === target[1]
+                && state.data[offset+2] === target[2]
+              ) {
+                toFill[toFill.length] = k
+							}
+						}
+					}
+				}
+			}
+		}
+		this.context.putImageData(state, 0, 0);
+  }
+
   this.drag = (a, b) => {
     const data = this.context.getImageData(0, 0, this.context.canvas.width, this.context.canvas.height)
     this.context.putImageData(data, step((b.x - a.x) * 2, 6), step((b.y - a.y) * 2, 6))
@@ -202,6 +263,8 @@ function Noodle () {
       this.set('ver')
     } else if (e.key === '6') {
       this.set('dot')
+    } else if (e.key === '7') {
+      this.set('bucket')
     } else if (e.key === '0') {
       this.set('drag')
     } else if (e.key === 'i') {
