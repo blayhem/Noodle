@@ -1,17 +1,22 @@
 'use strict'
 
-/* global cursor */
+/* global cursor MouseEvent Image */
 
 function Noodle () {
   this.el = document.createElement('canvas')
   this.context = this.el.getContext('2d')
   this.ratio = window.devicePixelRatio
+  this.offset = { x: 0, y: 0 }
+  this.tainted = false
 
   this.install = function (host) {
     host.appendChild(this.el)
     window.addEventListener('mousedown', this.onMouseDown, false)
     window.addEventListener('mousemove', this.onMouseMove, false)
     window.addEventListener('mouseup', this.onMouseUp, false)
+    window.addEventListener('touchstart', this.onMouseDown, { capture: false, passive: false })
+    window.addEventListener('touchmove', this.onMouseMove, { capture: false, passive: false })
+    window.addEventListener('touchend', this.onMouseUp, { capture: false, passive: false })
     window.addEventListener('keydown', this.onKeyDown, false)
     window.addEventListener('keyup', this.onKeyUp, false)
     window.addEventListener('contextmenu', this.onContext, false)
@@ -19,20 +24,13 @@ function Noodle () {
     window.addEventListener('drop', this.onDrop, false)
     window.addEventListener('paste', this.onPaste, false)
     window.addEventListener('beforeunload', this.onUnload, false)
-    this.fit()
   }
 
   this.start = function () {
-    this.fit()
+    console.clear()
+    this.resize(window.innerWidth - 15, window.innerHeight - 15)
     this.fill()
     this.set('trace')
-  }
-
-  this.fit = function (size = { w: window.innerWidth, h: window.innerHeight }) {
-    this.el.width = size.w
-    this.el.height = size.h
-    this.el.style.width = size.w + 'px'
-    this.el.style.height = size.h + 'px'
   }
 
   this.fill = (color = 'white') => {
@@ -40,6 +38,16 @@ function Noodle () {
     this.context.fillStyle = color
     this.context.fillRect(0, 0, window.innerWidth, window.innerHeight)
     this.context.restore()
+  }
+
+  this.resize = (w, h) => {
+    this.el.width = w
+    this.el.height = h
+    this.el.style.width = w + 'px'
+    this.el.style.height = h + 'px'
+    this.center()
+    this.fill()
+    this.update()
   }
 
   this.invert = () => {
@@ -87,7 +95,7 @@ function Noodle () {
   }
 
   this.update = () => {
-    const px = cursor.mode === 'tone' || cursor.mode === 'block' ? ' ' + cursor.size + 'px' : ''
+    const px = cursor.mode !== 'trace' ? ' ' + cursor.size + 'px' : ''
     const rs = ` ${window.innerWidth}x${window.innerHeight}`
     document.title = `noodle(${cursor.mode} ${cursor.color}${px})${rs}`
   }
@@ -99,7 +107,7 @@ function Noodle () {
     const dy = -Math.abs(b.y - a.y)
     let err = dx + dy; let e2
     for (;;) {
-      this.context.fillRect(a.x, a.y, 1, 1)
+      this.pixel(a.x, a.y)
       if (a.x === b.x && a.y === b.y) { break }
       e2 = 2 * err
       if (e2 >= dy) { err += dy; a.x += (a.x < b.x ? 1 : -1) }
@@ -108,14 +116,18 @@ function Noodle () {
   }
 
   this.pattern = (a, b, pat) => {
-    for (let x = 0; x <= cursor.size; x++) {
-      for (let y = 0; y <= cursor.size; y++) {
-        const pos = { x: b.x + x - Math.floor(cursor.size / 2), y: b.y + y - Math.floor(cursor.size / 2) }
+    for (let x = 0; x < cursor.size; x++) {
+      for (let y = 0; y < cursor.size; y++) {
+        const pos = { x: Math.floor(b.x + x - (cursor.size / 2)), y: Math.floor(b.y + y - (cursor.size / 2)) }
         if (pat(pos.x, pos.y) === true) {
-          this.context.fillRect(pos.x, pos.y, 1, 1)
+          this.pixel(pos.x, pos.y)
         }
       }
     }
+  }
+
+  this.pixel = (x, y) => {
+    this.context.fillRect(Math.floor(x), Math.floor(y), 1, 1)
   }
 
   this.tone = (a, b) => {
@@ -135,7 +147,12 @@ function Noodle () {
   }
 
   this.dot = (a, b) => {
-    this.pattern(a, b, _dot)
+    this.pattern(snap(a), snap(b), _dot)
+  }
+
+  this.deco = (a, b) => {
+    cursor.deco++
+    this.pattern(snap(a), snap(b), _deco)
   }
 
   this.line = (a, b) => {
@@ -150,7 +167,7 @@ function Noodle () {
 		for (let x = 0; x < this.el.width; x++){
 			filled[x] = new Array(this.el.width)
 		}
-    filled[cursor.a.x][cursor.a.y] = true
+    filled[Math.floor(cursor.a.x)][Math.floor(cursor.a.y)] = true
 
 		const target = []
 		let offset = (cursor.a.y * this.el.width + cursor.a.x) * 4
@@ -161,7 +178,7 @@ function Noodle () {
     const convert = n => n === 0 ? 'black' : 'white'
     const fill = cursor.color === 'black' ? 0 : 255
 
-    console.log(cursor.color, convert(target[0]), offset, target)
+    // console.log(cursor.color, convert(target[0]), offset, target)
 
     // Check if it's the same colour
 		if (target[0] !== fill) {
@@ -186,9 +203,10 @@ function Noodle () {
           ) {
 						offset = (k.y * this.el.width + k.x) * 4;
 
+            const [kx, ky] = [Math.floor(k.x), Math.floor(k.y)];
             // Avoid filling the same pixel again later
-						if (!filled[k.x][k.y]) {
-							filled[k.x][k.y] = true;
+						if (!filled[kx][ky]) {
+							filled[kx][ky] = true;
 							if (
                 state.data[offset] === target[0]
                 && state.data[offset+1] === target[1]
@@ -211,12 +229,24 @@ function Noodle () {
     cursor.a.y = b.y
   }
 
+  this.move = (x, y, leap = false) => {
+    this.offset.x -= x * (leap ? 100 : 50)
+    this.offset.y -= y * (leap ? 100 : 50)
+    this.el.setAttribute('style', `left:${this.offset.x}px;top:${-this.offset.y}px`)
+  }
+
+  this.center = () => {
+    this.offset.x = (window.innerWidth - this.el.width) / 2
+    this.offset.y = -(window.innerHeight - this.el.height) / 2
+    this.el.setAttribute('style', `left:${parseInt(this.offset.x)}px;top:${-parseInt(this.offset.y)}px`)
+  }
+
   // Events
 
   this.onMouseDown = (e) => {
     cursor.z = 1
-    cursor.a.x = e.clientX
-    cursor.a.y = e.clientY
+    cursor.a.x = (e.clientX || e.touches[0].clientX) - this.offset.x
+    cursor.a.y = (e.clientY || e.touches[0].clientY) + this.offset.y
     if (e.button > 1) {
       this.set('line')
     }
@@ -226,17 +256,18 @@ function Noodle () {
 
   this.onMouseMove = (e) => {
     if (cursor.z === 1) {
-      cursor.b.x = e.clientX
-      cursor.b.y = e.clientY
+      cursor.b.x = (e.clientX || e.touches[0].clientX) - this.offset.x
+      cursor.b.y = (e.clientY || e.touches[0].clientY) + this.offset.y
       this[cursor.mode](cursor.a, cursor.b)
     }
     e.preventDefault()
   }
 
   this.onMouseUp = (e) => {
+    this.tainted = true
     cursor.z = 0
-    cursor.b.x = e.clientX
-    cursor.b.y = e.clientY
+    cursor.b.x = (e.clientX || e.changedTouches[0].clientX) - this.offset.x
+    cursor.b.y = (e.clientY || e.changedTouches[0].clientY) + this.offset.y
     this[cursor.mode](cursor.a, cursor.b)
     if (e.button > 1) {
       this.set('trace')
@@ -264,6 +295,8 @@ function Noodle () {
     } else if (e.key === '6') {
       this.set('dot')
     } else if (e.key === '7') {
+      this.set('deco')
+    } else if (e.key === '8') {
       this.set('bucket')
     } else if (e.key === '0') {
       this.set('drag')
@@ -275,6 +308,16 @@ function Noodle () {
       this.size(-1)
     } else if (e.key === ']') {
       this.size(1)
+    } else if (e.key === 'ArrowDown') {
+      this.move(0, -1, e.shiftKey)
+    } else if (e.key === 'ArrowUp') {
+      this.move(0, 1, e.shiftKey)
+    } else if (e.key === 'ArrowRight') {
+      this.move(1, 0, e.shiftKey)
+    } else if (e.key === 'ArrowLeft') {
+      this.move(-1, 0, e.shiftKey)
+    } else if (e.key === 'Escape') {
+      this.center()
     }
     this.context.fillStyle = cursor.color
   }
@@ -296,7 +339,6 @@ function Noodle () {
     e.preventDefault()
     e.stopPropagation()
     const file = e.dataTransfer.files[0]
-    const filename = file.path ? file.path : file.name ? file.name : ''
     this.draw(file)
   }
 
@@ -316,6 +358,7 @@ function Noodle () {
   }
 
   this.onUnload = (e) => {
+    if (this.tainted !== true) { return }
     const confirmationMessage = '\o/';
     (e || window.event).returnValue = confirmationMessage
     return confirmationMessage
@@ -338,6 +381,10 @@ function Noodle () {
     return parseInt(val / len) * len
   }
 
+  function snap (pos) {
+    return { x: step(pos.x + (cursor.size / 2), cursor.size), y: step(pos.y + (cursor.size / 2), cursor.size) }
+  }
+
   // Textures
 
   function _halftone (x, y) {
@@ -349,13 +396,19 @@ function Noodle () {
   }
 
   function _hor (x, y) {
-    return y % 6 === 0
+    return y % (cursor.size / 2) === 0
   }
 
   function _ver (x, y) {
-    return x % 6 === 0
+    return x % (cursor.size / 2) === 0
   }
+
   function _dot (x, y) {
-    return x % 12 === 0 && y % 12 === 0
+    return x % cursor.size === 0 && y % cursor.size === 0
+  }
+
+  function _deco (x, y) {
+    const sp = { x: (x + (cursor.size / 2)) % cursor.size, y: (y + (cursor.size / 2)) % cursor.size }
+    return cursor.deco % 4 === 0 ? sp.x <= sp.y : cursor.deco % 4 === 1 ? sp.x >= sp.y : cursor.deco % 4 === 2 ? cursor.size - sp.x <= sp.y : cursor.size - sp.x >= sp.y
   }
 }
